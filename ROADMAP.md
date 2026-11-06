@@ -16,4 +16,4 @@ Reuse the existing Cloudflare Tunnel with a separate route. Verify authenticatio
 Test failure and restart cases, authorization boundaries, log size limits, API failures, rollback and client interoperability. Document operations.
 
 ## Execution policy
-After M0 architectural approval, the implementation agent should work autonomously through all feasible stages: code, test, fix, self-review and handoff. Independent reviewer verifies evidence and returns actionable findings. Escalate only blocked decisions, credentials, destructive changes or production-impacting operations. No production deployment or merge without explicit approval.
+After M0 discovery, the implementation agent should proceed autonomously through all safe, reversible non-production stages unless a material architecture/security decision requires owner approval. It should then continue through all feasible stages: code, test, fix, self-review and handoff. Independent reviewer verifies evidence and returns actionable findings. Escalate only blocked decisions, credentials, destructive changes or production-impacting operations. No production deployment or merge without explicit approval.
