@@ -17,3 +17,6 @@ Test failure and restart cases, authorization boundaries, log size limits, API f
 
 ## Execution policy
 After M0 discovery, the implementation agent should proceed autonomously through all safe, reversible non-production stages unless a material architecture/security decision requires owner approval. It should then continue through all feasible stages: code, test, fix, self-review and handoff. Independent reviewer verifies evidence and returns actionable findings. Escalate only blocked decisions, credentials, destructive changes or production-impacting operations. No production deployment or merge without explicit approval.
+
+## Scope clarification
+Filesystem MCP is explicitly out of scope. Do not implement host directory mounts, file moves, renames, creation, deletion or other host filesystem tools. This project is restricted to read-only Kubernetes diagnostics and container logs.
