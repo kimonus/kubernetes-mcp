@@ -32,3 +32,6 @@ Only ask the owner for missing permissions or credentials, material unresolved d
 
 ## Completion report
 Provide PR URL, exact head SHA, implemented scope, test commands and results, security checks, reviewed/unreviewed status, remaining blockers and the smallest next owner action. Do not mark the project complete before the applicable acceptance matrix is satisfied.
+
+## Scope clarification
+Filesystem MCP is explicitly out of scope. Do not implement host directory mounts, file moves, renames, creation, deletion or other host filesystem tools. This project is restricted to read-only Kubernetes diagnostics and container logs.
