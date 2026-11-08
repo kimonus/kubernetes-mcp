@@ -15,3 +15,6 @@ Do not deploy to production or merge unreviewed changes without approval.
 Follow [autonomous delivery protocol](docs/workflows/autonomous-delivery.md), [acceptance matrix](docs/testing/acceptance-matrix.md), and [architecture proposal](docs/architecture/0001-reference-architecture.md). Use [independent review prompt](INDEPENDENT_REVIEW_PROMPT.md) for a separate reviewer. Avoid repeated owner confirmation requests for routine research, tests, fixes or feature-branch commits. Collect related genuine blockers into one decision request with a recommended default.
 
 The Knowledge Vault public README documents Cloudflare Access Managed OAuth and origin-side validation. This is reference documentation, not evidence of the live tunnel topology. Verify current state locally before proposing modifications. Keep any sensitive discovery output out of this public repository.
+
+## Scope clarification
+Filesystem MCP is explicitly out of scope. Do not implement host directory mounts, file moves, renames, creation, deletion or other host filesystem tools. This project is restricted to read-only Kubernetes diagnostics and container logs.
