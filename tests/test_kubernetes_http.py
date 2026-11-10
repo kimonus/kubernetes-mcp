@@ -9,7 +9,7 @@ import unittest
 import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from src.server import MAX_OUTPUT, InvalidInput, Kubernetes, call_tool
+from src.server import MAX_API_JSON, InvalidInput, Kubernetes, call_tool
 
 
 class APIHandler(BaseHTTPRequestHandler):
@@ -26,7 +26,7 @@ class APIHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if self.path.startswith("/oversize"):
-            body = b"x" * (MAX_OUTPUT + 1)
+            body = b"x" * (MAX_API_JSON + 1)
         elif self.path.startswith("/denied"):
             self.send_error(403)
             return
@@ -34,7 +34,8 @@ class APIHandler(BaseHTTPRequestHandler):
             body = b"not json"
         else:
             body = json.dumps({"items": [{"metadata": {"name": "pod"}, "status": {"phase": "Running"},
-                                          "spec": {"secret": "must not escape"}}], "metadata": {}}).encode()
+                                          "spec": {"secret": "must not escape", "large": "x" * 70000}}],
+                               "metadata": {}}).encode()
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

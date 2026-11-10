@@ -1,11 +1,13 @@
 import json
+import socket
 import threading
 import unittest
 import urllib.error
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
+from unittest.mock import patch
 
-from src.server import MAX_OUTPUT, InvalidInput, call_tool, dispatch, make_handler
+from src.server import MAX_OUTPUT, BoundedHTTPServer, InvalidInput, Kubernetes, call_tool, dispatch, make_handler
 
 
 class FakeKubernetes:
@@ -80,13 +82,88 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(response["result"]["isError"])
         self.assertNotIn("private backend details", json.dumps(response))
 
-    def test_oversize_result_rejected(self):
+    def test_oversize_logs_are_truncated(self):
         class Large(FakeKubernetes):
             def get(self, *args, **kwargs):
                 return "x" * MAX_OUTPUT
         response = dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                              "params": {"name": "get_pod_logs", "arguments": {"namespace": "allowed", "pod": "pod", "container": "app"}}}, Large(), {"allowed"})
-        self.assertTrue(response["result"]["isError"])
+        self.assertNotIn("isError", response["result"])
+        output = json.loads(response["result"]["content"][0]["text"])
+        self.assertTrue(output["truncated"])
+        self.assertLessEqual(len(json.dumps(response).encode()), MAX_OUTPUT)
+
+    def test_log_truncation_accounts_for_json_escaping(self):
+        class Large(FakeKubernetes):
+            def get(self, *args, **kwargs):
+                return "é\\\n" * 16000
+        response = dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                             "params": {"name": "get_pod_logs", "arguments": {"namespace": "allowed", "pod": "pod", "container": "app"}}}, Large(), {"allowed"})
+        self.assertTrue(json.loads(response["result"]["content"][0]["text"])["truncated"])
+        self.assertLessEqual(len(json.dumps(response).encode()), MAX_OUTPUT)
+
+    def test_large_api_pod_spec_can_be_sanitized(self):
+        class Response:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+            def read(self, limit):
+                return json.dumps({"items": [{"metadata": {"name": "pod"}, "spec": {"data": "x" * 70000}}]}).encode()[:limit]
+        class Opener:
+            def open(self, *args, **kwargs):
+                return Response()
+        with patch("src.server.urllib.request.build_opener", return_value=Opener()):
+            kube = Kubernetes("https://kubernetes.invalid", "token", None)
+            result = call_tool(kube, {"allowed"}, "list_pods", {"namespace": "allowed"})
+        self.assertEqual(result["pods"][0]["name"], "pod")
+        self.assertNotIn("spec", json.dumps(result))
+
+    def test_pod_list_keeps_limit_stable_across_pages(self):
+        class PagedList(FakeKubernetes):
+            def get(self, path, query=None, raw=False):
+                self.calls.append((path, query))
+                if query["limit"] != 1:
+                    raise ValueError("continuation query changed")
+                return {"items": [{"metadata": {"name": "pod"}}], "metadata": {"continue": "next"}}
+        api = PagedList()
+        result = call_tool(api, {"allowed"}, "list_pods", {"namespace": "allowed"})
+        self.assertEqual(result["pods"][0]["name"], "pod")
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["continue"], "next")
+        call_tool(api, {"allowed"}, "list_pods", {"namespace": "allowed", "continue": "next"})
+        self.assertEqual([call[1]["limit"] for call in api.calls], [1, 1])
+        self.assertEqual(api.calls[-1][1]["continue"], "next")
+
+    def test_large_sanitized_pod_list_retries_smaller_page(self):
+        class ManyPods(FakeKubernetes):
+            def get(self, path, query=None, raw=False):
+                self.calls.append((path, query))
+                pod = {"metadata": {"name": "pod"}, "status": {"containerStatuses": [
+                    {"name": "container", "ready": True, "restartCount": 0} for _ in range(20)]}}
+                return {"items": [pod] * query["limit"], "metadata": {"continue": "next"}}
+        api = ManyPods()
+        result = call_tool(api, {"allowed"}, "list_pods", {"namespace": "allowed"})
+        self.assertEqual([call[1]["limit"] for call in api.calls], [1])
+        self.assertEqual(result["continue"], "next")
+
+    def test_raw_log_response_larger_than_limit_is_truncated(self):
+        class Response:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+            def read(self, limit):
+                return b"x" * limit
+        class Opener:
+            def open(self, *args, **kwargs):
+                return Response()
+        with patch("src.server.urllib.request.build_opener", return_value=Opener()):
+            kube = Kubernetes("https://kubernetes.invalid", "token", None)
+            result = call_tool(kube, {"allowed"}, "get_pod_logs",
+                               {"namespace": "allowed", "pod": "pod", "container": "app"})
+        self.assertTrue(result["truncated"])
+        self.assertEqual(len(result["untrusted_log_text"]), MAX_OUTPUT)
 
     def test_events_use_pod_uid(self):
         call_tool(self.kube, {"allowed"}, "get_pod_events", {"namespace": "allowed", "pod": "pod"})
@@ -137,6 +214,39 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body), [{"jsonrpc": "2.0", "id": 1, "result": {}}])
         self.assertEqual(self.request(headers, json.dumps(batch[1:]).encode())[0], 202)
+
+    def test_batch_with_multiple_tool_calls_returns_responses(self):
+        headers = {"Authorization": "Bearer " + "x" * 32, "Content-Type": "application/json"}
+        batch = [{"jsonrpc": "2.0", "id": n, "method": "tools/call", "params": {"name": "list_pods"}}
+                 for n in (1, 2)]
+        status, body = self.request(headers, json.dumps(batch).encode())
+        self.assertEqual(status, 200)
+        self.assertEqual(len(json.loads(body)), 2)
+
+    def test_slow_clients_release_all_connection_slots(self):
+        with patch("src.server.REQUEST_DEADLINE_SECONDS", 0.2):
+            server = BoundedHTTPServer(("127.0.0.1", 0), make_handler(FakeKubernetes(), {"allowed"}, "x" * 32, set()))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            clients = []
+            try:
+                for _ in range(16):
+                    client = socket.create_connection(("127.0.0.1", server.server_port), timeout=2)
+                    client.sendall(b"POST /mcp HTTP/1.1\r\nHost: localhost\r\nX-Slow: ")
+                    clients.append(client)
+                threading.Event().wait(0.7)
+                conn = HTTPConnection("127.0.0.1", server.server_port, timeout=2)
+                conn.request("POST", "/mcp", b'{}', {"Content-Type": "application/json"})
+                response = conn.getresponse()
+                self.assertEqual(response.status, 401)
+                response.read()
+                conn.close()
+            finally:
+                for client in clients:
+                    client.close()
+                server.shutdown()
+                server.server_close()
+                thread.join()
 
 
 if __name__ == "__main__":
