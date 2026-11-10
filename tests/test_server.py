@@ -1,4 +1,5 @@
 import json
+import os
 import socket
 import threading
 import unittest
@@ -14,6 +15,7 @@ from src.server import (
     Kubernetes,
     call_tool,
     dispatch,
+    main,
     make_handler,
 )
 
@@ -42,6 +44,11 @@ class CoreTests(unittest.TestCase):
     def test_all_namespaces_explicitly_allows_other_namespace(self):
         call_tool(self.kube, {"*"}, "describe_pod", {"namespace": "other", "pod": "pod"})
         self.assertEqual(self.kube.calls[0][0], "/api/v1/namespaces/other/pods/pod")
+
+    def test_wildcard_must_not_be_mixed_with_namespaces(self):
+        env = {"MCP_AUTH_MODE": "bearer", "MCP_BEARER_TOKEN": "x" * 32, "MCP_NAMESPACES": "*,allowed"}
+        with patch.dict(os.environ, env, clear=True), self.assertRaises(SystemExit):
+            main()
 
     def test_invalid_and_extra_arguments_denied(self):
         for args in ({"namespace": "allowed", "pod": "../secret"},
