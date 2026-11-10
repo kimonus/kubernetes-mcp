@@ -41,3 +41,22 @@ jobs:
         with:
           cluster_name: kubernetes-mcp-e2e
       - run: bash tests/kind_e2e.sh
+  staging-image:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/read-only-kubernetes-mcp'
+    needs: [test, isolated-kubernetes]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and publish commit-tagged staging image
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
+        run: |
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build -t "$REGISTRY_IMAGE:sha-$GITHUB_SHA" .
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c image --severity HIGH,CRITICAL --exit-code 1 "$REGISTRY_IMAGE:sha-$GITHUB_SHA"
+          docker push "$REGISTRY_IMAGE:sha-$GITHUB_SHA"
+          docker image inspect "$REGISTRY_IMAGE:sha-$GITHUB_SHA" --format '{{index .RepoDigests 0}}'
