@@ -5,6 +5,7 @@ accessIssuer: ""
 accessAudience: ""
 accessEmails: []
 namespaces: []
+allNamespaces: false
 allowedOrigins: []
 resources:
   requests:

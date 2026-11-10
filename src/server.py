@@ -50,7 +50,7 @@ def validate(args, fields, namespaces):
     for value in args.values():
         if not isinstance(value, str) or len(value) > 253 or not NAME.fullmatch(value):
             raise InvalidInput("Invalid resource name")
-    if args["namespace"] not in namespaces:
+    if "*" not in namespaces and args["namespace"] not in namespaces:
         raise InvalidInput("Namespace not allowed")
 
 
@@ -382,7 +382,7 @@ def main():
                                      set(filter(None, os.environ.get("MCP_ACCESS_EMAILS", "").split(","))))
     elif mode != "bearer" or len(token) < 32:
         raise SystemExit("Set MCP_AUTH_MODE and a valid authentication configuration")
-    if not namespaces or any(not NAME.fullmatch(n) for n in namespaces):
+    if not namespaces or ("*" in namespaces and len(namespaces) != 1) or any(n != "*" and not NAME.fullmatch(n) for n in namespaces):
         raise SystemExit("Set explicit MCP_NAMESPACES")
     sa = "/var/run/secrets/kubernetes.io/serviceaccount/"
     def kube_token():

@@ -3,7 +3,8 @@
 {{- if not (has .Values.authMode (list "bearer" "cloudflare")) }}{{ fail "invalid authMode" }}{{ end }}
 {{- if and (eq .Values.authMode "bearer") (not .Values.tokenSecret) }}{{ fail "tokenSecret is required for bearer mode" }}{{ end }}
 {{- if and (eq .Values.authMode "cloudflare") (or (not .Values.accessIssuer) (not .Values.accessAudience) (not .Values.accessEmails)) }}{{ fail "Cloudflare issuer, audience and emails are required" }}{{ end }}
-{{- if not .Values.namespaces }}{{ fail "at least one namespace is required" }}{{ end }}
+{{- if and .Values.allNamespaces .Values.namespaces }}{{ fail "allNamespaces and namespaces are mutually exclusive" }}{{ end }}
+{{- if and (not .Values.allNamespaces) (not .Values.namespaces) }}{{ fail "at least one namespace is required unless allNamespaces is enabled" }}{{ end }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -35,7 +36,11 @@ spec:
             - name: MCP_AUTH_MODE
               value: {{ .Values.authMode | quote }}
             - name: MCP_NAMESPACES
+              {{- if .Values.allNamespaces }}
+              value: "*"
+              {{- else }}
               value: {{ join "," .Values.namespaces | quote }}
+              {{- end }}
             - name: MCP_ALLOWED_ORIGINS
               value: {{ join "," .Values.allowedOrigins | quote }}
             {{- if eq .Values.authMode "bearer" }}
@@ -70,6 +75,33 @@ spec:
   selector: {app.kubernetes.io/instance: {{ .Release.Name | quote }}, app.kubernetes.io/name: kubernetes-mcp}
   ports:
     - {name: http, port: 8080, targetPort: http}
+{{- if .Values.allNamespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-kubernetes-mcp
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-kubernetes-mcp
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-kubernetes-mcp
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-kubernetes-mcp
+{{- else }}
 {{- range .Values.namespaces }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -98,4 +130,5 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ $.Release.Name }}-kubernetes-mcp
+{{- end }}
 {{- end }}

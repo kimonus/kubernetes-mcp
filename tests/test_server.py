@@ -39,6 +39,10 @@ class CoreTests(unittest.TestCase):
             call_tool(self.kube, {"allowed"}, "describe_pod", {"namespace": "other", "pod": "pod"})
         self.assertEqual(self.kube.calls, [])
 
+    def test_all_namespaces_explicitly_allows_other_namespace(self):
+        call_tool(self.kube, {"*"}, "describe_pod", {"namespace": "other", "pod": "pod"})
+        self.assertEqual(self.kube.calls[0][0], "/api/v1/namespaces/other/pods/pod")
+
     def test_invalid_and_extra_arguments_denied(self):
         for args in ({"namespace": "allowed", "pod": "../secret"},
                      {"namespace": "allowed", "pod": "pod", "extra": "x"}):

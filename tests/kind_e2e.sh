@@ -68,3 +68,23 @@ helm uninstall e2e
 if kubectl -n mcp-fixture get role e2e-kubernetes-mcp --ignore-not-found -o name | grep -q .; then exit 1; fi
 if kubectl -n mcp-fixture get rolebinding e2e-kubernetes-mcp --ignore-not-found -o name | grep -q .; then exit 1; fi
 if kubectl -n default get service e2e-kubernetes-mcp --ignore-not-found -o name | grep -q .; then exit 1; fi
+kill "$forward_pid" 2>/dev/null || true
+forward_pid=''
+
+# Explicit all-namespaces mode must include namespaces created after installation.
+helm install e2e-all chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  --set tokenSecret=mcp-e2e-token --set allNamespaces=true
+kubectl -n default set image deployment/e2e-all-kubernetes-mcp server=kubernetes-mcp:e2e
+kubectl -n default rollout status deployment/e2e-all-kubernetes-mcp --timeout=120s
+kubectl create namespace mcp-created-later
+identity=system:serviceaccount:default:e2e-all-kubernetes-mcp
+kubectl auth can-i list pods -n mcp-denied --as "$identity" --quiet
+kubectl auth can-i list pods -n mcp-created-later --as "$identity" --quiet
+if kubectl auth can-i get secrets -n mcp-denied --as "$identity" --quiet; then exit 1; fi
+if kubectl auth can-i create pods -n mcp-denied --as "$identity" --quiet; then exit 1; fi
+kubectl -n default port-forward svc/e2e-all-kubernetes-mcp 18081:8080 > /tmp/kubernetes-mcp-all-e2e-forward.log 2>&1 &
+forward_pid=$!
+python3 tests/kind_all_namespaces_client.py
+helm uninstall e2e-all
+if kubectl get clusterrole default-e2e-all-kubernetes-mcp --ignore-not-found -o name | grep -q .; then exit 1; fi
+if kubectl get clusterrolebinding default-e2e-all-kubernetes-mcp --ignore-not-found -o name | grep -q .; then exit 1; fi
