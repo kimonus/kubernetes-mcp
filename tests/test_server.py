@@ -51,6 +51,13 @@ class CoreTests(unittest.TestCase):
         with patch.dict(os.environ, env, clear=True), self.assertRaises(SystemExit):
             main()
 
+    def test_cloudflare_mode_requires_origin_tls(self):
+        env = {"MCP_AUTH_MODE": "cloudflare", "MCP_NAMESPACES": "allowed",
+               "MCP_ACCESS_ISSUER": "https://test.cloudflareaccess.com", "MCP_ACCESS_AUDIENCE": "audience",
+               "MCP_ACCESS_EMAILS": "user@example.com"}
+        with patch.dict(os.environ, env, clear=True), self.assertRaisesRegex(SystemExit, "requires origin TLS"):
+            main()
+
     def test_invalid_and_extra_arguments_denied(self):
         for args in ({"namespace": "allowed", "pod": "../secret"},
                      {"namespace": "allowed", "pod": "pod", "extra": "x"}):

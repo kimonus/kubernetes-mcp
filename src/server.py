@@ -345,8 +345,9 @@ class BoundedHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address, handler):
+    def __init__(self, address, handler, tls_context=None):
         self.connections = threading.BoundedSemaphore(16)
+        self.tls_context = tls_context
         super().__init__(address, handler)
 
     def handle_error(self, request, client_address):
@@ -365,9 +366,40 @@ class BoundedHTTPServer(ThreadingHTTPServer):
 
     def process_request_thread(self, request, client_address):
         try:
-            super().process_request_thread(request, client_address)
+            connection = request
+            if self.tls_context is not None:
+                try:
+                    connection = self.tls_context.wrap_socket(request, server_side=True, do_handshake_on_connect=False)
+                    connection.settimeout(10)
+                    def expire_handshake():
+                        try:
+                            connection.shutdown(socket.SHUT_RDWR)
+                        except OSError:
+                            pass
+                    timer = threading.Timer(REQUEST_DEADLINE_SECONDS, expire_handshake)
+                    timer.daemon = True
+                    timer.start()
+                    try:
+                        connection.do_handshake()
+                    finally:
+                        timer.cancel()
+                except OSError:
+                    self.shutdown_request(connection)
+                    return
+            super().process_request_thread(connection, client_address)
         finally:
             self.connections.release()
+
+
+def make_tls_context(cert_file, key_file):
+    if bool(cert_file) != bool(key_file):
+        raise ValueError("Both TLS certificate and key are required")
+    if not cert_file:
+        return None
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(cert_file, key_file)
+    return context
 
 
 def main():
@@ -384,6 +416,9 @@ def main():
         raise SystemExit("Set MCP_AUTH_MODE and a valid authentication configuration")
     if not namespaces or ("*" in namespaces and len(namespaces) != 1) or any(n != "*" and not NAME.fullmatch(n) for n in namespaces):
         raise SystemExit("Set explicit MCP_NAMESPACES")
+    tls = make_tls_context(os.environ.get("MCP_TLS_CERT_FILE", ""), os.environ.get("MCP_TLS_KEY_FILE", ""))
+    if mode == "cloudflare" and tls is None:
+        raise SystemExit("Cloudflare authentication requires origin TLS")
     sa = "/var/run/secrets/kubernetes.io/serviceaccount/"
     def kube_token():
         with open(sa + "token", encoding="utf-8") as f:
@@ -391,7 +426,7 @@ def main():
     host = "https://" + os.environ["KUBERNETES_SERVICE_HOST"] + ":" + os.environ["KUBERNETES_SERVICE_PORT_HTTPS"]
     kube = Kubernetes(host, kube_token, sa + "ca.crt")
     origins = set(filter(None, os.environ.get("MCP_ALLOWED_ORIGINS", "").split(",")))
-    BoundedHTTPServer(("0.0.0.0", 8080), make_handler(kube, namespaces, token, origins, access)).serve_forever()
+    BoundedHTTPServer(("0.0.0.0", 8080), make_handler(kube, namespaces, token, origins, access), tls).serve_forever()
 
 
 if __name__ == "__main__":

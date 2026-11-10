@@ -13,7 +13,16 @@ if [[ ${#nodes[@]} != 1 ]] || [[ $(docker inspect -f '{{ index .Config.Labels "i
 fi
 kubeconfig=$(mktemp)
 forward_pid=''
-trap 'if [[ -n "$forward_pid" ]]; then kill "$forward_pid" 2>/dev/null || true; fi; rm -f "$kubeconfig"' EXIT
+tls_dir=''
+cleanup() {
+  if [[ -n "$forward_pid" ]]; then kill "$forward_pid" 2>/dev/null || true; fi
+  rm -f "$kubeconfig"
+  if [[ -n "$tls_dir" ]]; then
+    rm -f "$tls_dir/cert.pem" "$tls_dir/key.pem"
+    rmdir "$tls_dir"
+  fi
+}
+trap cleanup EXIT
 kind get kubeconfig --name kubernetes-mcp-e2e > "$kubeconfig"
 export KUBECONFIG="$kubeconfig"
 if [[ $(kubectl config current-context) != kind-kubernetes-mcp-e2e ]]; then
@@ -88,3 +97,19 @@ python3 tests/kind_all_namespaces_client.py
 helm uninstall e2e-all
 if kubectl get clusterrole default-e2e-all-kubernetes-mcp --ignore-not-found -o name | grep -q .; then exit 1; fi
 if kubectl get clusterrolebinding default-e2e-all-kubernetes-mcp --ignore-not-found -o name | grep -q .; then exit 1; fi
+kill "$forward_pid" 2>/dev/null || true
+forward_pid=''
+
+# Exercise the origin TLS listener using a synthetic, temporary certificate.
+tls_dir=$(mktemp -d)
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -keyout "$tls_dir/key.pem" -out "$tls_dir/cert.pem" \
+  -subj /CN=localhost -addext subjectAltName=DNS:localhost >/dev/null 2>&1
+kubectl -n default create secret tls e2e-origin-tls --cert="$tls_dir/cert.pem" --key="$tls_dir/key.pem"
+helm install e2e-tls chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  --set tokenSecret=mcp-e2e-token --set tlsSecret=e2e-origin-tls --set 'namespaces[0]=mcp-fixture'
+kubectl -n default set image deployment/e2e-tls-kubernetes-mcp server=kubernetes-mcp:e2e
+kubectl -n default rollout status deployment/e2e-tls-kubernetes-mcp --timeout=120s
+kubectl -n default port-forward svc/e2e-tls-kubernetes-mcp 18082:8080 > /tmp/kubernetes-mcp-tls-e2e-forward.log 2>&1 &
+forward_pid=$!
+python3 tests/kind_tls_client.py "$tls_dir/cert.pem"
+helm uninstall e2e-tls

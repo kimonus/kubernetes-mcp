@@ -4,6 +4,7 @@
 {{- if not (has .Values.authMode (list "bearer" "cloudflare")) }}{{ fail "invalid authMode" }}{{ end }}
 {{- if and (eq .Values.authMode "bearer") (not .Values.tokenSecret) }}{{ fail "tokenSecret is required for bearer mode" }}{{ end }}
 {{- if and (eq .Values.authMode "cloudflare") (or (not .Values.accessIssuer) (not .Values.accessAudience) (not .Values.accessEmails)) }}{{ fail "Cloudflare issuer, audience and emails are required" }}{{ end }}
+{{- if and (eq .Values.authMode "cloudflare") (not .Values.tlsSecret) }}{{ fail "tlsSecret is required for Cloudflare mode" }}{{ end }}
 {{- if and .Values.allNamespaces .Values.namespaces }}{{ fail "allNamespaces and namespaces are mutually exclusive" }}{{ end }}
 {{- if and (not .Values.allNamespaces) (not .Values.namespaces) }}{{ fail "at least one namespace is required unless allNamespaces is enabled" }}{{ end }}
 apiVersion: v1
@@ -27,6 +28,7 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
+        fsGroup: 65532
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: server
@@ -44,6 +46,12 @@ spec:
               {{- end }}
             - name: MCP_ALLOWED_ORIGINS
               value: {{ join "," .Values.allowedOrigins | quote }}
+            {{- if .Values.tlsSecret }}
+            - name: MCP_TLS_CERT_FILE
+              value: /run/tls/tls.crt
+            - name: MCP_TLS_KEY_FILE
+              value: /run/tls/tls.key
+            {{- end }}
             {{- if eq .Values.authMode "bearer" }}
             - name: MCP_BEARER_TOKEN
               valueFrom:
@@ -60,12 +68,23 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
+          {{- if .Values.tlsSecret }}
+          volumeMounts:
+            - {name: origin-tls, mountPath: /run/tls, readOnly: true}
+          {{- end }}
           readinessProbe:
             tcpSocket: {port: http}
           livenessProbe:
             tcpSocket: {port: http}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.tlsSecret }}
+      volumes:
+        - name: origin-tls
+          secret:
+            secretName: {{ .Values.tlsSecret | quote }}
+            defaultMode: 0440
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

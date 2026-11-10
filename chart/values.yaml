@@ -1,5 +1,6 @@
 image: ""
 tokenSecret: ""
+tlsSecret: ""
 authMode: bearer
 accessIssuer: ""
 accessAudience: ""
