@@ -54,6 +54,12 @@ status = tool("describe_pod", {"namespace": "mcp-fixture", "pod": "fixture"})
 assert json.loads(status["content"][0]["text"])["phase"] == "Running"
 events = tool("get_pod_events", {"namespace": "mcp-fixture", "pod": "fixture"})
 assert not events.get("isError")
+missing = tool("describe_pod", {"namespace": "mcp-fixture", "pod": "deleted-pod"})
+assert missing.get("isError")
+large = tool("get_pod_logs", {"namespace": "mcp-fixture", "pod": "z-large-fixture", "container": "z-large-fixture"})
+assert not large.get("isError")
+assert len(json.dumps(large).encode()) <= 64 * 1024
+assert len(json.loads(large["content"][0]["text"])["untrusted_log_text"]) > 1000
 previous = tool("get_previous_logs", args)
 assert json.loads(previous["content"][0]["text"])["available"] is False
 
