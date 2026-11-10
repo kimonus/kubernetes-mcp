@@ -85,12 +85,18 @@ jobs:
           TESTED_IMAGE_DIGEST: ${{ needs.isolated-kubernetes.outputs.image_digest }}
         run: |
           printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker buildx build --no-cache --provenance=false --build-arg SOURCE_DATE_EPOCH=0 --tag "$REGISTRY_IMAGE:sha-$GITHUB_SHA" --metadata-file /tmp/staging-image-metadata.json --output type=docker,dest=/tmp/staging-image.tar,rewrite-timestamp=true .
+          quarantine_tag="$REGISTRY_IMAGE:quarantine-$GITHUB_SHA-$GITHUB_RUN_ID"
+          staging_tag="$REGISTRY_IMAGE:sha-$GITHUB_SHA"
+          docker buildx build --no-cache --provenance=false --build-arg SOURCE_DATE_EPOCH=0 --tag "$quarantine_tag" --metadata-file /tmp/staging-image-metadata.json --output type=docker,dest=/tmp/staging-image.tar,rewrite-timestamp=true .
           built_digest=$(python3 -c 'import json; print(json.load(open("/tmp/staging-image-metadata.json"))["containerimage.digest"])')
           test -n "$TESTED_IMAGE_DIGEST" && test "$built_digest" = "$TESTED_IMAGE_DIGEST"
           docker load --input /tmp/staging-image.tar
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c image --severity HIGH,CRITICAL --exit-code 1 "$REGISTRY_IMAGE:sha-$GITHUB_SHA"
-          docker push "$REGISTRY_IMAGE:sha-$GITHUB_SHA"
-          pushed_ref=$(docker image inspect "$REGISTRY_IMAGE:sha-$GITHUB_SHA" --format '{{index .RepoDigests 0}}')
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c image --severity HIGH,CRITICAL --exit-code 1 "$quarantine_tag"
+          docker push "$quarantine_tag"
+          pushed_ref=$(docker image inspect "$quarantine_tag" --format '{{index .RepoDigests 0}}')
+          test "${pushed_ref##*@}" = "$TESTED_IMAGE_DIGEST"
+          docker tag "$quarantine_tag" "$staging_tag"
+          docker push "$staging_tag"
+          pushed_ref=$(docker image inspect "$staging_tag" --format '{{index .RepoDigests 0}}')
           test "${pushed_ref##*@}" = "$TESTED_IMAGE_DIGEST"
           printf 'Tested and scanned image: %s\n' "$pushed_ref"

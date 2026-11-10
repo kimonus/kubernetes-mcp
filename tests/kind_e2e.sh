@@ -60,14 +60,24 @@ kubectl -n default create secret generic mcp-e2e-token --from-literal=token=xxxx
 docker buildx build --no-cache --provenance=false --build-arg SOURCE_DATE_EPOCH=0 --tag kubernetes-mcp:e2e \
   --metadata-file "$build_dir/metadata.json" --output "type=docker,dest=$build_dir/image.tar,rewrite-timestamp=true" .
 image_digest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$build_dir/metadata.json")
+image_config=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["containerimage.config.digest"])' "$build_dir/metadata.json")
 printf 'image_digest=%s\n' "$image_digest" >> "$GITHUB_OUTPUT"
 docker load --input "$build_dir/image.tar"
 kind load docker-image kubernetes-mcp:e2e --name kubernetes-mcp-e2e
+verify_running_image() {
+  local release=$1 image_id
+  image_id=$(kubectl -n default get pods -l "app.kubernetes.io/instance=$release" -o json | python3 -c 'import json,sys; pods=json.load(sys.stdin)["items"]; ids=[c["imageID"] for p in pods if p.get("status",{}).get("phase")=="Running" and not p["metadata"].get("deletionTimestamp") for c in p.get("status",{}).get("containerStatuses",[]) if c.get("name")=="server" and c.get("ready")]; assert len(ids)==1; print(ids[0])')
+  case "$image_id" in
+    *"$image_digest"|*"$image_config") ;;
+    *) echo 'Running pod image identity does not match the tested build' >&2; exit 1 ;;
+  esac
+}
 helm install e2e chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   --set tokenSecret=mcp-e2e-token --set 'namespaces[0]=mcp-fixture'
 # kind loaded this local tag; override only this disposable deployment's placeholder digest.
 kubectl -n default set image deployment/e2e-kubernetes-mcp server=kubernetes-mcp:e2e
 kubectl -n default rollout status deployment/e2e-kubernetes-mcp --timeout=120s
+verify_running_image e2e
 
 identity=system:serviceaccount:default:e2e-kubernetes-mcp
 kubectl auth can-i get pods -n mcp-fixture --as "$identity" --quiet
@@ -92,6 +102,7 @@ helm install e2e-all chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaa
   --set tokenSecret=mcp-e2e-token --set allNamespaces=true
 kubectl -n default set image deployment/e2e-all-kubernetes-mcp server=kubernetes-mcp:e2e
 kubectl -n default rollout status deployment/e2e-all-kubernetes-mcp --timeout=120s
+verify_running_image e2e-all
 kubectl create namespace mcp-created-later
 identity=system:serviceaccount:default:e2e-all-kubernetes-mcp
 kubectl auth can-i list pods -n mcp-denied --as "$identity" --quiet
@@ -116,6 +127,7 @@ helm install e2e-tls chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaa
   --set tokenSecret=mcp-e2e-token --set tlsSecret=e2e-origin-tls --set 'namespaces[0]=mcp-fixture'
 kubectl -n default set image deployment/e2e-tls-kubernetes-mcp server=kubernetes-mcp:e2e
 kubectl -n default rollout status deployment/e2e-tls-kubernetes-mcp --timeout=120s
+verify_running_image e2e-tls
 kubectl -n default port-forward svc/e2e-tls-kubernetes-mcp 18082:8080 > /tmp/kubernetes-mcp-tls-e2e-forward.log 2>&1 &
 forward_pid=$!
 python3 tests/kind_tls_client.py "$tls_dir/cert.pem"
