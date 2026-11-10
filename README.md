@@ -10,4 +10,4 @@ Install `requirements.txt` and run the local suite with `python3 -m unittest dis
 
 The chart deliberately requires an immutable image digest, a pre-existing Secret named by `tokenSecret` with key `token`, and at least one `namespaces` entry. It does not configure an ingress, tunnel, or NetworkPolicy. A ClusterIP is not an authorization boundary: other cluster workloads may reach it. No production installation is authorized or recommended until the remaining gates are met.
 
-See [discovery and outstanding work](docs/discovery.md), [threat model](docs/security/threat-model.md), [roadmap](ROADMAP.md), and [acceptance matrix](docs/testing/acceptance-matrix.md).
+See [discovery and outstanding work](docs/discovery.md), [operations](docs/operations.md), [threat model](docs/security/threat-model.md), [roadmap](ROADMAP.md), and [acceptance matrix](docs/testing/acceptance-matrix.md).
