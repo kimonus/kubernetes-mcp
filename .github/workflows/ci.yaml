@@ -10,7 +10,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python -m pip install -r requirements.txt
+      - run: |
+          python -m pip install --only-binary=:all: --require-hashes -r requirements.txt
       - run: python -m pip install pip-audit==2.10.1
       - run: pip-audit --disable-pip --no-deps -r requirements.txt
       - run: python -m pip install ruff==0.16.9
@@ -46,9 +47,24 @@ jobs:
         with:
           cluster_name: kubernetes-mcp-e2e
       - run: bash tests/kind_e2e.sh
+  reproducibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Compare two clean image manifests
+        run: |
+          for run in first second; do
+            docker buildx build --no-cache --provenance=false --build-arg SOURCE_DATE_EPOCH=0 --output "type=oci,dest=/tmp/$run.tar,rewrite-timestamp=true" .
+          done
+          first=$(tar -xOf /tmp/first.tar index.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["manifests"][0]["digest"])')
+          second=$(tar -xOf /tmp/second.tar index.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["manifests"][0]["digest"])')
+          test "$first" = "$second"
+          printf 'Matching image manifest: %s\n' "$first"
   staging-image:
     if: github.event_name == 'push' && github.ref == 'refs/heads/feat/read-only-kubernetes-mcp'
-    needs: [test, isolated-kubernetes]
+    needs: [test, isolated-kubernetes, reproducibility]
     runs-on: ubuntu-latest
     permissions:
       contents: read
