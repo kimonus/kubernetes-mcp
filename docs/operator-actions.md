@@ -4,12 +4,28 @@ This file collects the owner actions needed for hosted deployment. Do not put re
 
 ## 1. Create a separate Cloudflare API token
 
-Create a **new token**; do not widen the existing DNS token. Restrict it to the account that owns the existing tunnel and the relevant DNS zone, with the following minimum capabilities:
+Create a **new token**; do not widen the existing DNS token. In the [Cloudflare dashboard](https://dash.cloudflare.com/):
+
+1. Sign in with a user who can manage the account and the relevant zone. Open **My Profile → API Tokens**. This creates a user API token, which is separate from a tunnel connector token.
+2. Select **Create Token**, then select **Create Custom Token** (or the custom-token option). Name it `kubernetes-mcp-deployment`.
+3. Add these three permission rows. The scope and permission group are separate dropdowns; select **Edit** (or **Write** if that is the label shown):
+
+   | Scope | Permission group | Access |
+   | --- | --- | --- |
+   | Account | Cloudflare Tunnel | Edit |
+   | Account | Access: Apps and Policies | Edit |
+   | Zone | Access: Apps and Policies | Edit |
+
+4. Under resource rules, select **Include → Specific account** and choose the account that owns the existing tunnel. For zone resources, select **Include → Specific zone** and choose the zone for the new hostname. Do not select all accounts or all zones. Depending on the dashboard version, these rules may be configured inside separate account and zone policies.
+5. Optionally set an expiration long enough for the deployment work. Leave client IP filtering unset unless you know the public outbound IP used by the machine running the agent; an incorrect filter blocks the token.
+6. Select **Continue to summary**, check the three permissions and resource restrictions, then select **Create Token**. Copy the displayed secret immediately; Cloudflare shows it only once. Save it using the commands below, and do not paste it into chat.
+
+These permissions provide:
 
 - Account: **Cloudflare Tunnel Edit** (including reading the current tunnel configuration and updating the new route).
 - Account and zone: **Access: Apps and Policies Edit** for the relevant account and zone, to inspect existing policies as authorized and configure the new application. Cloudflare exposes separate account- and zone-scoped Access permission groups; both may be needed for this setup.
 
-Keep the existing DNS-scoped credential for the DNS change. If the Cloudflare dashboard uses newer permission names, choose the equivalent connector and Access application permissions. The agent must verify the exact endpoints and granted capabilities before making changes; remove any scope found unnecessary afterward. Do not create a new tunnel or change the existing service. See [Cloudflare's Managed OAuth guide](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/) and [permission reference](https://developers.cloudflare.com/fundamentals/api/reference/permissions/).
+Keep the existing DNS-scoped credential for the DNS change. If the Cloudflare dashboard uses newer permission names, choose the equivalent connector and Access application permissions. The agent must verify the exact endpoints and granted capabilities before making changes; remove any scope found unnecessary afterward. Do not create a new tunnel or change the existing service. See Cloudflare's [token creation guide](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/), [Managed OAuth guide](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/) and [permission reference](https://developers.cloudflare.com/fundamentals/api/reference/permissions/).
 
 On the machine running this agent, save the new token outside the repository. The following Bash commands do not echo the token:
 
