@@ -26,6 +26,14 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         self.requests.append((self.path, self.headers.get("Authorization")))
+        if self.path.startswith("/timeout"):
+            threading.Event().wait(6)
+            try:
+                self.send_response(200)
+                self.end_headers()
+            except OSError:
+                pass
+            return
         if self.path.startswith("/redirect"):
             self.send_response(302)
             self.send_header("Location", "/target")
@@ -114,6 +122,10 @@ class KubernetesHTTPTests(unittest.TestCase):
             self.client.get("/malformed")
         with self.assertRaises(urllib.error.HTTPError):
             self.client.get("/denied")
+
+    def test_kubernetes_api_read_timeout(self):
+        with self.assertRaises((TimeoutError, urllib.error.URLError)):
+            self.client.get("/timeout")
 
 
 if __name__ == "__main__":
