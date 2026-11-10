@@ -13,6 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 
 MAX_REQUEST = 32 * 1024
 MAX_OUTPUT = 64 * 1024
@@ -38,6 +39,8 @@ class OversizeResponse(InvalidInput):
 
 
 class LogText(str):
+    truncated: bool
+
     def __new__(cls, value, truncated):
         obj = super().__new__(cls, value)
         obj.truncated = truncated
@@ -115,7 +118,7 @@ def call_tool(kube, namespaces, name, args):
     root = "/api/v1/namespaces/" + ns
     if name == "list_pods":
         # Keep the query stable across Kubernetes continuation tokens.
-        query = {"limit": 1}
+        query: dict[str, str | int] = {"limit": 1}
         if cursor:
             query["continue"] = cursor
         result = kube.get(root + "/pods", query)
@@ -154,7 +157,7 @@ def call_tool(kube, namespaces, name, args):
             "upstream_limit_bytes": MAX_OUTPUT}
 
 
-def schema(fields):
+def schema(fields: dict[str, str]) -> dict[str, Any]:
     return {"type": "object", "properties": {k: {"type": v} for k, v in fields.items()},
             "required": list(fields), "additionalProperties": False}
 
@@ -165,7 +168,7 @@ def dispatch(message, kube, namespaces):
     method, ident = message["method"], message.get("id")
     if "id" not in message:
         return None
-    result = None
+    result: Any = None
     if method == "initialize":
         result = {"protocolVersion": PROTOCOL, "capabilities": {"tools": {}},
                   "serverInfo": {"name": "kubernetes-mcp", "version": "0.1.0"}}
@@ -292,6 +295,7 @@ def make_handler(kube, namespaces, token, origins, access=None):
                 self.send_error(503)
                 return
             try:
+                result: Any
                 if isinstance(message, list):
                     if not message or len(message) > 16:
                         self.send_error(400)
