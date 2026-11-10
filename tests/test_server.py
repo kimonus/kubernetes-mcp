@@ -4,6 +4,7 @@ import socket
 import threading
 import unittest
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from unittest.mock import patch
@@ -98,6 +99,15 @@ class CoreTests(unittest.TestCase):
                 raise OSError("private backend details")
         response = dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                              "params": {"name": "describe_pod", "arguments": {"namespace": "allowed", "pod": "pod"}}}, Broken(), {"allowed"})
+        self.assertTrue(response["result"]["isError"])
+        self.assertNotIn("private backend details", json.dumps(response))
+
+    def test_api_timeout_is_sanitized(self):
+        class TimedOut:
+            def get(self, *args, **kwargs):
+                raise TimeoutError("private backend details")
+        response = dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                             "params": {"name": "describe_pod", "arguments": {"namespace": "allowed", "pod": "pod"}}}, TimedOut(), {"allowed"})
         self.assertTrue(response["result"]["isError"])
         self.assertNotIn("private backend details", json.dumps(response))
 
@@ -266,6 +276,56 @@ class HTTPTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join()
+
+    def test_tool_concurrency_limit_and_recovery(self):
+        entered = 0
+        lock = threading.Lock()
+        full = threading.Event()
+        release = threading.Event()
+
+        class BlockingKubernetes:
+            def get(self, *args, **kwargs):
+                nonlocal entered
+                with lock:
+                    entered += 1
+                    if entered == 8:
+                        full.set()
+                if not release.wait(5):
+                    raise TimeoutError("test timed out")
+                return {"metadata": {"name": "pod"}}
+
+        server = BoundedHTTPServer(("127.0.0.1", 0), make_handler(BlockingKubernetes(), {"allowed"}, "x" * 32, set()))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        message = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+            "name": "describe_pod", "arguments": {"namespace": "allowed", "pod": "pod"}}}).encode()
+
+        def request():
+            conn = HTTPConnection("127.0.0.1", server.server_port, timeout=6)
+            try:
+                conn.request("POST", "/mcp", message, {"Content-Type": "application/json", "Authorization": "Bearer " + "x" * 32})
+                response = conn.getresponse()
+                status = response.status
+                response.read()
+                return status
+            finally:
+                conn.close()
+
+        try:
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                pending = [pool.submit(request) for _ in range(8)]
+                try:
+                    self.assertTrue(full.wait(3), "eight requests did not reach the backend")
+                    self.assertEqual(request(), 503)
+                finally:
+                    release.set()
+                self.assertEqual([item.result() for item in pending], [200] * 8)
+            self.assertEqual(request(), 200)
+        finally:
+            release.set()
+            server.shutdown()
+            server.server_close()
+            thread.join()
 
 
 if __name__ == "__main__":
