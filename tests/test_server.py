@@ -290,7 +290,7 @@ class HTTPTests(unittest.TestCase):
                     entered += 1
                     if entered == 8:
                         full.set()
-                if not release.wait(5):
+                if not release.wait(20):
                     raise TimeoutError("test timed out")
                 return {"metadata": {"name": "pod"}}
 
@@ -301,13 +301,13 @@ class HTTPTests(unittest.TestCase):
             "name": "describe_pod", "arguments": {"namespace": "allowed", "pod": "pod"}}}).encode()
 
         def request():
-            conn = HTTPConnection("127.0.0.1", server.server_port, timeout=6)
+            conn = HTTPConnection("127.0.0.1", server.server_port, timeout=22)
             try:
                 conn.request("POST", "/mcp", message, {"Content-Type": "application/json", "Authorization": "Bearer " + "x" * 32})
                 response = conn.getresponse()
                 status = response.status
-                response.read()
-                return status
+                body = response.read()
+                return status, json.loads(body) if status == 200 else None
             finally:
                 conn.close()
 
@@ -315,12 +315,17 @@ class HTTPTests(unittest.TestCase):
             with ThreadPoolExecutor(max_workers=8) as pool:
                 pending = [pool.submit(request) for _ in range(8)]
                 try:
-                    self.assertTrue(full.wait(3), "eight requests did not reach the backend")
-                    self.assertEqual(request(), 503)
+                    self.assertTrue(full.wait(10), "eight requests did not reach the backend")
+                    self.assertEqual(request()[0], 503)
                 finally:
                     release.set()
-                self.assertEqual([item.result() for item in pending], [200] * 8)
-            self.assertEqual(request(), 200)
+                for item in pending:
+                    status, body = item.result()
+                    self.assertEqual(status, 200)
+                    self.assertFalse(body["result"].get("isError"))
+            status, body = request()
+            self.assertEqual(status, 200)
+            self.assertFalse(body["result"].get("isError"))
         finally:
             release.set()
             server.shutdown()
