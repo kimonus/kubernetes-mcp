@@ -15,14 +15,16 @@ class FakeKubernetes:
 
 
 async def smoke(port):
-    async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + "x" * 32}) as http:
-        async with streamable_http_client(f"http://127.0.0.1:{port}/mcp", http_client=http) as streams:
-            async with ClientSession(streams[0], streams[1]) as session:
-                await session.initialize()
-                tools = await session.list_tools()
-                assert len(tools.tools) == 5
-                result = await session.call_tool("list_pods", {"namespace": "allowed"})
-                assert not result.is_error
+    async with (
+        httpx2.AsyncClient(headers={"Authorization": "Bearer " + "x" * 32}) as http,
+        streamable_http_client(f"http://127.0.0.1:{port}/mcp", http_client=http) as streams,
+        ClientSession(streams[0], streams[1]) as session,
+    ):
+        await session.initialize()
+        tools = await session.list_tools()
+        assert len(tools.tools) == 5
+        result = await session.call_tool("list_pods", {"namespace": "allowed"})
+        assert not result.is_error
 
 
 def main():

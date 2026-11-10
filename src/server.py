@@ -145,6 +145,7 @@ def call_tool(kube, namespaces, name, args):
         logs = kube.get(root + "/pods/" + pod + "/log", query, raw=True)
     except urllib.error.HTTPError as exc:
         if name == "get_previous_logs" and exc.code == 400:
+            exc.close()
             return {"available": False}
         raise
     # Kubernetes may return slightly less than limitBytes, so upstream truncation is unknown.
@@ -264,29 +265,37 @@ def make_handler(kube, namespaces, token, origins, access=None):
 
         def do_POST(self):
             if self.path != "/mcp":
-                self.send_error(404); return
+                self.send_error(404)
+                return
             if not self.authorized():
                 return
             if self.headers.get_content_type() != "application/json":
-                self.send_error(415); return
+                self.send_error(415)
+                return
             version = self.headers.get("MCP-Protocol-Version")
             if version and version != PROTOCOL:
-                self.send_error(400); return
+                self.send_error(400)
+                return
             if self.headers.get("Transfer-Encoding"):
-                self.send_error(400); return
+                self.send_error(400)
+                return
             try:
                 length = int(self.headers.get("Content-Length", "-1"))
                 if length < 0 or length > MAX_REQUEST:
-                    self.send_error(413); return
+                    self.send_error(413)
+                    return
                 message = json.loads(self.rfile.read(length))
             except (ValueError, UnicodeDecodeError):
-                self.send_error(400); return
+                self.send_error(400)
+                return
             if not slots.acquire(blocking=False):
-                self.send_error(503); return
+                self.send_error(503)
+                return
             try:
                 if isinstance(message, list):
                     if not message or len(message) > 16:
-                        self.send_error(400); return
+                        self.send_error(400)
+                        return
                     result = []
                     budget = (MAX_OUTPUT - 2048) // len(message)
                     for item in message:
@@ -304,16 +313,23 @@ def make_handler(kube, namespaces, token, origins, access=None):
             finally:
                 slots.release()
             if result is None:
-                self.send_response(202); self.end_headers(); return
+                self.send_response(202)
+                self.end_headers()
+                return
             body = json.dumps(result).encode()
             if len(body) > MAX_OUTPUT:
-                self.send_error(413); return
-            self.send_response(200); self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+                self.send_error(413)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def do_GET(self):
             if self.path != "/mcp":
-                self.send_error(404); return
+                self.send_error(404)
+                return
             if not self.authorized():
                 return
             self.send_response(405)

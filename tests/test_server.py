@@ -7,7 +7,15 @@ from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 
-from src.server import MAX_OUTPUT, BoundedHTTPServer, InvalidInput, Kubernetes, call_tool, dispatch, make_handler
+from src.server import (
+    MAX_OUTPUT,
+    BoundedHTTPServer,
+    InvalidInput,
+    Kubernetes,
+    call_tool,
+    dispatch,
+    make_handler,
+)
 
 
 class FakeKubernetes:

@@ -2,18 +2,24 @@
 import json
 import os
 import ssl
-import subprocess
 import tempfile
 import threading
 import unittest
 import urllib.error
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import ClassVar
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 from src.server import MAX_API_JSON, InvalidInput, Kubernetes, call_tool
 
 
 class APIHandler(BaseHTTPRequestHandler):
-    requests = []
+    requests: ClassVar[list[tuple[str, str | None]]] = []
 
     def log_message(self, *args):
         pass
@@ -48,9 +54,19 @@ class KubernetesHTTPTests(unittest.TestCase):
         cls.directory = tempfile.TemporaryDirectory()
         cert = os.path.join(cls.directory.name, "cert.pem")
         key = os.path.join(cls.directory.name, "key.pem")
-        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
-                        "-keyout", key, "-out", cert, "-subj", "/CN=localhost",
-                        "-addext", "subjectAltName=DNS:localhost"], check=True, capture_output=True)
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+        now = datetime.now(timezone.utc)
+        certificate = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+                       .public_key(private_key.public_key()).serial_number(x509.random_serial_number())
+                       .not_valid_before(now - timedelta(minutes=1)).not_valid_after(now + timedelta(days=1))
+                       .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), critical=False)
+                       .sign(private_key, hashes.SHA256()))
+        with open(key, "wb") as output:
+            output.write(private_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                                   serialization.NoEncryption()))
+        with open(cert, "wb") as output:
+            output.write(certificate.public_bytes(serialization.Encoding.PEM))
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), APIHandler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(cert, key)
