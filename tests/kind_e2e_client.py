@@ -59,5 +59,11 @@ for attempt in range(90):
         raise AssertionError("fixture container did not restart")
     time.sleep(1)
 args = {"namespace": "mcp-fixture", "pod": "restart-fixture", "container": "restart-fixture"}
-previous = tool("get_previous_logs", args)
-assert "previous-log-marker" in json.loads(previous["content"][0]["text"])["untrusted_log_text"]
+for attempt in range(30):
+    previous = tool("get_previous_logs", args)
+    body = json.loads(previous["content"][0]["text"]) if not previous.get("isError") else {}
+    if "previous-log-marker" in body.get("untrusted_log_text", ""):
+        break
+    if attempt == 29:
+        raise AssertionError(f"previous synthetic container logs were not available: {body!r}")
+    time.sleep(1)
