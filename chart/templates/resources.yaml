@@ -1,5 +1,6 @@
 {{- if not .Values.image }}{{ fail "image must be an immutable image reference" }}{{ end }}
 {{- if not (regexMatch "@sha256:[a-f0-9]{64}$" .Values.image) }}{{ fail "image must be pinned by sha256 digest" }}{{ end }}
+{{- if not (kindIs "bool" .Values.allNamespaces) }}{{ fail "allNamespaces must be a boolean" }}{{ end }}
 {{- if not (has .Values.authMode (list "bearer" "cloudflare")) }}{{ fail "invalid authMode" }}{{ end }}
 {{- if and (eq .Values.authMode "bearer") (not .Values.tokenSecret) }}{{ fail "tokenSecret is required for bearer mode" }}{{ end }}
 {{- if and (eq .Values.authMode "cloudflare") (or (not .Values.accessIssuer) (not .Values.accessAudience) (not .Values.accessEmails)) }}{{ fail "Cloudflare issuer, audience and emails are required" }}{{ end }}
