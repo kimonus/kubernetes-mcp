@@ -31,6 +31,8 @@ The intended namespace scope is **all current and future namespaces**, including
 
 Use a separate hostname and Access application. The agent can check whether a suitable unused hostname under the existing zone is available and recommend one privately. The allowed identities must be explicitly defined for the new Access policy; the agent can inspect the existing policy once the new token has the required access and propose matching its authorized identities. Do not reuse the existing application's audience or alter its route.
 
+The new origin requires TLS. The agent will first check privately whether the cluster can issue a certificate for the chosen origin name. If it cannot, supply a `kubernetes.io/tls` Secret in the service's namespace containing a certificate and key trusted by the connector; share only the Secret name and the corresponding origin server name, never the private key. The connector must verify the certificate rather than disabling verification. This fallback cannot be finalized until the hostname and existing certificate-issuer capabilities are known.
+
 ## 3. Review prior public history
 
 An earlier commit in the draft PR included limited live-infrastructure configuration details. Those details were removed from the current tree, but remain in previously published history; no credential values were included. Rewriting published history or closing/replacing the PR can disrupt collaborators and does not by itself guarantee removal of cached copies. Decide separately whether history remediation is required before authorizing any rewrite; follow GitHub's sensitive-data removal procedure if applicable.

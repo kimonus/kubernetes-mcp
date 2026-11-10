@@ -12,11 +12,14 @@ if [[ ${#nodes[@]} != 1 ]] || [[ $(docker inspect -f '{{ index .Config.Labels "i
   exit 1
 fi
 kubeconfig=$(mktemp)
+build_dir=$(mktemp -d)
 forward_pid=''
 tls_dir=''
 cleanup() {
   if [[ -n "$forward_pid" ]]; then kill "$forward_pid" 2>/dev/null || true; fi
   rm -f "$kubeconfig"
+  rm -f "$build_dir/image.tar" "$build_dir/metadata.json"
+  rmdir "$build_dir"
   if [[ -n "$tls_dir" ]]; then
     rm -f "$tls_dir/cert.pem" "$tls_dir/key.pem"
     rmdir "$tls_dir"
@@ -54,7 +57,11 @@ kubectl -n mcp-fixture wait --for=condition=Ready pod/z-large-fixture --timeout=
 kubectl -n mcp-fixture wait --for=condition=Ready pod/multi-fixture --timeout=120s
 kubectl -n default create secret generic mcp-e2e-token --from-literal=token=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
-docker build -t kubernetes-mcp:e2e .
+docker buildx build --no-cache --provenance=false --build-arg SOURCE_DATE_EPOCH=0 --tag kubernetes-mcp:e2e \
+  --metadata-file "$build_dir/metadata.json" --output "type=docker,dest=$build_dir/image.tar,rewrite-timestamp=true" .
+image_digest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$build_dir/metadata.json")
+printf 'image_digest=%s\n' "$image_digest" >> "$GITHUB_OUTPUT"
+docker load --input "$build_dir/image.tar"
 kind load docker-image kubernetes-mcp:e2e --name kubernetes-mcp-e2e
 helm install e2e chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   --set tokenSecret=mcp-e2e-token --set 'namespaces[0]=mcp-fixture'
