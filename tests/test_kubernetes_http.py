@@ -5,6 +5,7 @@ import socket
 import ssl
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 from datetime import datetime, timedelta, timezone
@@ -13,11 +14,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import ClassVar
 from unittest.mock import patch
 
+import jwt
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
+from src.cloudflare import AccessAuthenticator
 from src.server import (
     MAX_API_JSON,
     BoundedHTTPServer,
@@ -198,6 +201,49 @@ class KubernetesHTTPTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join()
+
+    def test_cloudflare_assertions_over_tls(self):
+        with open(self.key, "rb") as source:
+            signing_key = serialization.load_pem_private_key(source.read(), password=None)
+        jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(signing_key.public_key()))
+        jwk.update({"kid": "synthetic-key", "alg": "RS256", "use": "sig"})
+        auth = AccessAuthenticator("https://test.cloudflareaccess.com", "audience", {"user@example.com"},
+                                   fetch=lambda: {"keys": [jwk]})
+        context = make_tls_context(self.cert, self.key)
+        server = BoundedHTTPServer(("127.0.0.1", 0), make_handler(None, {"allowed"}, "", set(), auth), context)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        now = int(time.time())
+        claims = {"iss": "https://test.cloudflareaccess.com", "aud": "audience", "email": "user@example.com",
+                  "sub": "user", "iat": now, "exp": now + 60}
+
+        def request(assertion=None):
+            conn = HTTPSConnection("localhost", server.server_port, timeout=3,
+                                   context=ssl.create_default_context(cafile=self.cert))
+            headers = {"Content-Type": "application/json"}
+            if assertion:
+                headers["Cf-Access-Jwt-Assertion"] = assertion
+            try:
+                conn.request("POST", "/mcp", b'{"jsonrpc":"2.0","id":1,"method":"ping"}', headers)
+                response = conn.getresponse()
+                status = response.status
+                response.read()
+                return status
+            finally:
+                conn.close()
+
+        try:
+            valid = jwt.encode(claims, signing_key, algorithm="RS256", headers={"kid": "synthetic-key"})
+            wrong = jwt.encode({**claims, "aud": "wrong"}, signing_key, algorithm="RS256", headers={"kid": "synthetic-key"})
+            expired = jwt.encode({**claims, "exp": now - 1}, signing_key, algorithm="RS256", headers={"kid": "synthetic-key"})
+            self.assertEqual(request(), 401)
+            self.assertEqual(request(valid), 200)
+            self.assertEqual(request(wrong), 401)
+            self.assertEqual(request(expired), 401)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
 
 
 if __name__ == "__main__":

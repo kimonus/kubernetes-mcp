@@ -262,6 +262,7 @@ def make_handler(kube, namespaces, token, origins, access=None):
             if not authorized:
                 self.send_response(401)
                 self.send_header("WWW-Authenticate", "Bearer")
+                self.send_header("Content-Length", "0")
                 self.end_headers()
                 return False
             return True
@@ -318,6 +319,7 @@ def make_handler(kube, namespaces, token, origins, access=None):
                 slots.release()
             if result is None:
                 self.send_response(202)
+                self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
             body = json.dumps(result).encode()
@@ -338,6 +340,7 @@ def make_handler(kube, namespaces, token, origins, access=None):
                 return
             self.send_response(405)
             self.send_header("Allow", "POST")
+            self.send_header("Content-Length", "0")
             self.end_headers()
 
         def do_DELETE(self):
