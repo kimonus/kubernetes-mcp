@@ -1,0 +1,31 @@
+name: checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pip install pip-audit==2.10.1
+      - run: pip-audit --disable-pip --no-deps -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python -m pip install mcp==2.3.0
+      - run: python -m tests.mcp_client_smoke
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --prefix /tmp/kubernetes-mcp-client-test @modelcontextprotocol/sdk@1.32.2
+      - run: python -m tests.typescript_client_smoke
+        env:
+          MCP_TS_SDK: /tmp/kubernetes-mcp-client-test/node_modules/@modelcontextprotocol/sdk/dist/esm
+      - run: python -m compileall -q src tests
+      - uses: azure/setup-helm@v4
+      - run: helm lint chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set tokenSecret=test --set 'namespaces[0]=test'
+      - run: helm template test chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set tokenSecret=test --set 'namespaces[0]=test' > /dev/null
+      - run: docker build -t kubernetes-mcp:test .
+      - run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c image --severity HIGH,CRITICAL --exit-code 1 kubernetes-mcp:test

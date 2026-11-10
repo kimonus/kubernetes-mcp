@@ -1,0 +1,101 @@
+{{- if not .Values.image }}{{ fail "image must be an immutable image reference" }}{{ end }}
+{{- if not (regexMatch "@sha256:[a-f0-9]{64}$" .Values.image) }}{{ fail "image must be pinned by sha256 digest" }}{{ end }}
+{{- if not (has .Values.authMode (list "bearer" "cloudflare")) }}{{ fail "invalid authMode" }}{{ end }}
+{{- if and (eq .Values.authMode "bearer") (not .Values.tokenSecret) }}{{ fail "tokenSecret is required for bearer mode" }}{{ end }}
+{{- if and (eq .Values.authMode "cloudflare") (or (not .Values.accessIssuer) (not .Values.accessAudience) (not .Values.accessEmails)) }}{{ fail "Cloudflare issuer, audience and emails are required" }}{{ end }}
+{{- if not .Values.namespaces }}{{ fail "at least one namespace is required" }}{{ end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-kubernetes-mcp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-kubernetes-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/instance: {{ .Release.Name | quote }}, app.kubernetes.io/name: kubernetes-mcp}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/instance: {{ .Release.Name | quote }}, app.kubernetes.io/name: kubernetes-mcp}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-kubernetes-mcp
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: server
+          image: {{ .Values.image | quote }}
+          ports:
+            - {name: http, containerPort: 8080}
+          env:
+            - name: MCP_AUTH_MODE
+              value: {{ .Values.authMode | quote }}
+            - name: MCP_NAMESPACES
+              value: {{ join "," .Values.namespaces | quote }}
+            - name: MCP_ALLOWED_ORIGINS
+              value: {{ join "," .Values.allowedOrigins | quote }}
+            {{- if eq .Values.authMode "bearer" }}
+            - name: MCP_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.tokenSecret | quote }}, key: token}
+            {{- else }}
+            - name: MCP_ACCESS_ISSUER
+              value: {{ .Values.accessIssuer | quote }}
+            - name: MCP_ACCESS_AUDIENCE
+              value: {{ .Values.accessAudience | quote }}
+            - name: MCP_ACCESS_EMAILS
+              value: {{ join "," .Values.accessEmails | quote }}
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          readinessProbe:
+            tcpSocket: {port: http}
+          livenessProbe:
+            tcpSocket: {port: http}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-kubernetes-mcp
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/instance: {{ .Release.Name | quote }}, app.kubernetes.io/name: kubernetes-mcp}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+{{- range .Values.namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $.Release.Name }}-kubernetes-mcp
+  namespace: {{ . | quote }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $.Release.Name }}-kubernetes-mcp
+  namespace: {{ . | quote }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $.Release.Name }}-kubernetes-mcp
+    namespace: {{ $.Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $.Release.Name }}-kubernetes-mcp
+{{- end }}

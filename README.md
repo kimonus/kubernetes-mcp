@@ -1,1 +1,11 @@
-# kubernetes-mcp
+# Kubernetes MCP
+
+An **experimental, incomplete** read-only Kubernetes diagnostics server. Do not deploy or expose it: origin authentication and its transport have not passed independent security review or live integration tests. The Helm chart is for review and isolated testing only.
+
+The prototype implements five diagnostics operations: pod listing, selected status, current and previous container logs, and pod events. It enforces an explicit namespace allowlist, fixed log tail and time bounds, output limits, API timeouts, and read-only API paths. Kubernetes RBAC remains the authoritative backstop; the chart creates namespace-scoped Roles, not a ClusterRole. Logs and events are untrusted and may contain credentials or prompt injection. Users and clients must treat their content as data.
+
+Install `requirements.txt` and run the local suite with `python3 -m unittest discover -s tests -v`. HTTP tests require loopback networking. The server expects in-cluster service account credentials and `MCP_NAMESPACES` (comma-separated namespaces). Select `MCP_AUTH_MODE=cloudflare` with `MCP_ACCESS_ISSUER`, `MCP_ACCESS_AUDIENCE`, and `MCP_ACCESS_EMAILS` for signed Access assertions, or `MCP_AUTH_MODE=bearer` and `MCP_BEARER_TOKEN` (at least 32 characters) for private testing. `MCP_ALLOWED_ORIGINS` is an optional comma-separated exact-origin allowlist. Bearer mode uses one shared credential, has no per-user scopes, expiry or revocation beyond rotation, and the HTTP listener has no TLS. Token rotation requires restarting the process. This is not an acceptable public authentication design. Cloudflare mode verifies assertion signatures and claims locally, but does not check live revocation and has not been verified with Managed OAuth or the live tunnel.
+
+The chart deliberately requires an immutable image digest, a pre-existing Secret named by `tokenSecret` with key `token`, and at least one `namespaces` entry. It does not configure an ingress, tunnel, or NetworkPolicy. A ClusterIP is not an authorization boundary: other cluster workloads may reach it. No production installation is authorized or recommended until the remaining gates are met.
+
+See [discovery and outstanding work](docs/discovery.md), [threat model](docs/security/threat-model.md), [roadmap](ROADMAP.md), and [acceptance matrix](docs/testing/acceptance-matrix.md).
