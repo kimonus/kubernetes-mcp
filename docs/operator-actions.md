@@ -16,9 +16,15 @@ Create a **new token**; do not widen the existing DNS token. In the [Cloudflare 
    | Account | Access: Apps and Policies | Edit |
    | Zone | Access: Apps and Policies | Edit |
 
+   If the tunnel permission is shown as **Argo Tunnel (Legacy)**, use it with Edit. A token with that label was verified to read the existing tunnel configuration; write access has not yet been verified.
+
 4. Under resource rules, select **Include → Specific account** and choose the account that owns the existing tunnel. For zone resources, select **Include → Specific zone** and choose the zone for the new hostname. Do not select all accounts or all zones. Depending on the dashboard version, these rules may be configured inside separate account and zone policies.
 5. Optionally set an expiration long enough for the deployment work. Leave client IP filtering unset unless you know the public outbound IP used by the machine running the agent; an incorrect filter blocks the token.
 6. Select **Continue to summary**, check the three permissions and resource restrictions, then select **Create Token**. Copy the displayed secret immediately; Cloudflare shows it only once. Save it using the commands below, and do not paste it into chat.
+
+### If zone Access returns 403
+
+The token supplied for this project can read the tunnel and account-level Access apps, but Cloudflare returned HTTP 403 for zone-level Access applications and policies. In **API Tokens**, find `kubernetes-mcp-deployment` and use its **Edit** action. Check that it has a separate **Zone → Access: Apps and Policies → Edit** permission and that its zone resource rule includes the specific zone containing the existing hostname. The similarly named **Account** permission is separate and does not replace the zone permission. Save the changes. If the dashboard offers only account-scoped permissions, create a **user token** through **My Profile → API Tokens** with all three rows above instead. Keep the token in the same private file if its value changes. The agent will retest the zone endpoints; do not share the secret in chat.
 
 These permissions provide:
 
