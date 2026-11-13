@@ -1,6 +1,6 @@
 # Operations and rollout plan
 
-This is a rollout plan, not authorization or evidence of a production deployment. Keep site-specific hostnames, Access settings, identities and credentials outside this public repository. The service exposes logs and events, which can contain sensitive data and hostile instructions. Grant access only to clients allowed to read every configured namespace.
+The service has been installed in a dedicated namespace and a separate protected route has been configured. Anonymous requests and OAuth discovery have been checked; authenticated hosted access and revocation remain unverified. Keep site-specific hostnames, Access settings, identities and credentials outside this public repository. The service exposes logs and events, which can contain sensitive data and hostile instructions. Grant access only to clients allowed to read every configured namespace.
 
 ## Prerequisites
 

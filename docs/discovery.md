@@ -2,7 +2,7 @@
 
 ## Evidence
 
-Read-only local discovery was performed. Sensitive infrastructure findings are deliberately excluded from this public repository. The route configuration, effective Access policy, token revocation behavior, configuration ownership, and connectivity for a new Service still require verification. No routing, DNS, Access policy, workload, or Knowledge Vault changes were made.
+Sensitive infrastructure findings are deliberately excluded from this public repository. A separate Cloudflare Access application, DNS record and tunnel route have been created, and the service is deployed in a dedicated namespace. Existing tunnel ingress entries were preserved; a private rollback snapshot was saved outside the repository. The existing endpoint returned the same unauthenticated status before and after the route change. Hosted authenticated access and token revocation still require verification.
 
 The local Knowledge Vault repository describes Cloudflare Access Managed OAuth and independent origin verification of Access assertions. That is a reference design, not evidence that the current live configuration matches it. Further inspection must avoid saving private topology or credentials to this public repository.
 
@@ -10,7 +10,7 @@ The [containers Kubernetes MCP server](https://github.com/containers/kubernetes-
 
 ## Remaining gates
 
-- Verify live tunnel configuration ownership, route isolation, Access policy and origin authentication privately. Do not modify the existing service. Obtain explicit approval before routing or deployment changes.
+- Verify hosted authenticated routing and origin authentication privately, including connector certificate verification and route isolation. The existing tunnel is Cloudflare-managed, the new route specifies verified origin TLS, and its existing ingress entries were preserved; end-to-end connector verification remains outstanding.
 - Complete protocol negotiation and conformance using a maintained MCP SDK or demonstrate equivalent behavior. Local smoke tests with the official Python and TypeScript MCP clients initialized, listed five tools and called `list_pods` against a simulated backend; these are not full conformance tests.
 - Validate the new origin-side assertion verifier with hosted clients, including OAuth discovery and real Access revocation semantics. Offline JWT verification alone does not provide immediate revocation. The prototype bearer token is not a hosted solution.
 - Validate pod-list continuation, real Kubernetes API timeouts, and deletion races against an isolated cluster. A delayed local TLS endpoint verifies the Kubernetes client's HTTP timeout; other simulated cases cover API errors, oversized and malformed responses, redirects, and projected-token rotation. The guarded kind job covers bounded and oversized logs, untrusted text, multi-container status, concurrency, a restarted container and release removal. See [the test plan](testing/isolated-e2e.md).
