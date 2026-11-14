@@ -12,6 +12,6 @@ The repository-owned PNG icon is `src/assets/icon.png` (128 × 128, `image/png`)
 
 For an existing app after deployment:
 
-1. Open the custom app's settings/details in ChatGPT, and refresh its tools to retrieve updated definitions and descriptions.
+1. Open [ChatGPT Plugins](https://chatgpt.com/plugins), select the custom connection and choose **Refresh** to retrieve updated definitions and descriptions. Start a new conversation and retest the affected tools. In managed workspaces, an administrator may need to refresh and enable new actions in workspace app settings. See [OpenAI's refresh instructions](https://developers.openai.com/plugins/deploy/connect-chatgpt).
 2. If the app's registration UI offers name and description editing, use **Kubernetes Diagnostics MCP** and the description in `src/metadata.py`; save the changes. If it does not, use the settings provided for that connection. Do not recreate or disconnect a working app merely to refresh tools.
 3. Check the app's displayed icon in the client. If the client provides an icon upload or an app-directory registration field, the repository PNG can be supplied there; do not assume that it reads the server's embedded icon. The availability of this setting and icon rendering has not been verified for this connection.
