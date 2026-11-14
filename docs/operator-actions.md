@@ -2,6 +2,8 @@
 
 This file collects the owner actions needed for hosted deployment. Do not put real tokens, account identifiers, email addresses, or private hostnames in this public repository or in chat.
 
+Current status: the operator supplied a token and selected the same allowed identity as the existing service. A separate Access application, route and Kubernetes release have been deployed. The original tools work through the ChatGPT connector. After a tool expansion, the connector's catalog must be refreshed and the new tools verified in ChatGPT; see [metadata and ChatGPT](metadata-and-chatgpt.md).
+
 ## 1. Create a separate Cloudflare API token
 
 Create a **new token**; do not widen the existing DNS token. In the [Cloudflare dashboard](https://dash.cloudflare.com/):
@@ -51,9 +53,9 @@ Tell the agent only the file path, not the token. Remove the temporary file afte
 
 The intended namespace scope is **all current and future namespaces**, including system namespaces. This is an explicit choice. The service account cannot use the Kubernetes Secrets API or mutate resources, but Kubernetes returns complete pod specs to it: those specs may contain literal credentials or Secret references. A compromised service process or service account token can read those specs across the cluster. Logs and events in any namespace can also contain credentials. No further namespace selection is needed.
 
-Use a separate hostname and Access application. The agent can check whether a suitable unused hostname under the existing zone is available and recommend one privately. The allowed identities must be explicitly defined for the new Access policy; the agent can inspect the existing policy once the new token has the required access and propose matching its authorized identities. Do not reuse the existing application's audience or alter its route.
+The separate hostname and Access application use their own audience and the same single allowed identity as the existing application, as selected by the operator. The existing application's route was preserved.
 
-The new origin requires TLS. The agent will first check privately whether the cluster can issue a certificate for the chosen origin name. If it cannot, supply a `kubernetes.io/tls` Secret in the service's namespace containing a certificate and key trusted by the connector; share only the Secret name and the corresponding origin server name, never the private key. The connector must verify the certificate rather than disabling verification. This fallback cannot be finalized until the hostname and existing certificate-issuer capabilities are known.
+The new origin uses TLS with a certificate issued by the existing cluster issuer. The connector is configured to verify the certificate.
 
 ## 3. Review prior public history
 
