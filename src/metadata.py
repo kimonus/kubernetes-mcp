@@ -23,6 +23,7 @@ _DESCRIPTIONS = {
     "list_workloads": "List a bounded page of Deployments, StatefulSets, DaemonSets, Jobs or CronJobs in a namespace.",
     "get_workload_details": "Read selected workload status, rollout conditions and failure reasons.",
     "list_services": "List a bounded page of namespace services and available endpoint readiness counts.",
+    "list_nodes": "Discover a bounded page of nodes and their health conditions when cluster diagnostics are enabled.",
     "get_node_status": "Read node conditions, capacity and resource pressure when cluster scope is enabled.",
     "list_node_metrics": "Read a bounded page of node CPU and memory metrics when Metrics Server is available and cluster scope is enabled.",
     "list_pod_metrics": "Read a bounded page of pod CPU and memory metrics when Metrics Server is available.",
