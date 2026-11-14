@@ -1,0 +1,104 @@
+name: checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --only-binary=:all: --require-hashes -r requirements.txt
+      - run: python -m pip install pip-audit==2.10.1
+      - run: pip-audit --disable-pip --no-deps -r requirements.txt
+      - run: python -m pip install ruff==0.16.9
+      - run: ruff check --isolated --select E4,E7,E9,F,I,SIM117,RUF012 src tests
+      - run: python -m pip install mypy==1.19.1
+      - run: mypy --check-untyped-defs src
+      - run: python -m unittest discover -s tests -v
+      - run: python -m pip install mcp==2.3.0
+      - run: python -m tests.mcp_client_smoke
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --prefix /tmp/kubernetes-mcp-client-test @modelcontextprotocol/sdk@1.32.2
+      - run: python -m tests.typescript_client_smoke
+        env:
+          MCP_TS_SDK: /tmp/kubernetes-mcp-client-test/node_modules/@modelcontextprotocol/sdk/dist/esm
+      - run: python -m compileall -q src tests
+      - uses: azure/setup-helm@v4
+      - run: helm lint chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set tokenSecret=test --set 'namespaces[0]=test'
+      - run: helm lint chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set tokenSecret=test --set allNamespaces=true
+      - run: helm lint chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set authMode=cloudflare --set accessIssuer=https://example.cloudflareaccess.com --set accessAudience=example --set 'accessEmails[0]=user@example.invalid' --set 'namespaces[0]=test' --set tlsSecret=test-tls
+      - name: Reject ambiguous all-namespaces settings
+        run: |
+          if helm template test chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set tokenSecret=test --set-string allNamespaces=false >/dev/null 2>&1; then exit 1; fi
+          if helm template test chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set tokenSecret=test --set allNamespaces=true --set 'namespaces[0]=test' >/dev/null 2>&1; then exit 1; fi
+          if helm template test chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set authMode=cloudflare --set accessIssuer=https://example.cloudflareaccess.com --set accessAudience=example --set 'accessEmails[0]=user@example.invalid' --set 'namespaces[0]=test' >/dev/null 2>&1; then exit 1; fi
+      - run: helm template test chart --set image=example.invalid/test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set tokenSecret=test --set 'namespaces[0]=test' > /dev/null
+      - run: docker build -t kubernetes-mcp:test .
+      - run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c image --severity HIGH,CRITICAL --exit-code 1 kubernetes-mcp:test
+  isolated-kubernetes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      image_digest: ${{ steps.e2e.outputs.image_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          cluster_name: kubernetes-mcp-e2e
+      - id: e2e
+        run: bash tests/kind_e2e.sh
+  reproducibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Compare two clean image manifests
+        run: |
+          for run in first second; do
+            docker buildx build --no-cache --provenance=false --build-arg SOURCE_DATE_EPOCH=0 --output "type=oci,dest=/tmp/$run.tar,rewrite-timestamp=true" .
+          done
+          first=$(tar -xOf /tmp/first.tar index.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["manifests"][0]["digest"])')
+          second=$(tar -xOf /tmp/second.tar index.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["manifests"][0]["digest"])')
+          test "$first" = "$second"
+          printf 'Matching image manifest: %s\n' "$first"
+  staging-image:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/read-only-kubernetes-mcp'
+    needs: [test, isolated-kubernetes, reproducibility]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and publish commit-tagged staging image
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
+          TESTED_IMAGE_DIGEST: ${{ needs.isolated-kubernetes.outputs.image_digest }}
+        run: |
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          quarantine_tag="$REGISTRY_IMAGE:quarantine-$GITHUB_SHA-$GITHUB_RUN_ID"
+          staging_tag="$REGISTRY_IMAGE:sha-$GITHUB_SHA"
+          docker buildx build --no-cache --provenance=false --build-arg SOURCE_DATE_EPOCH=0 --tag "$quarantine_tag" --metadata-file /tmp/staging-image-metadata.json --output type=docker,dest=/tmp/staging-image.tar,rewrite-timestamp=true .
+          built_digest=$(python3 -c 'import json; print(json.load(open("/tmp/staging-image-metadata.json"))["containerimage.digest"])')
+          test -n "$TESTED_IMAGE_DIGEST" && test "$built_digest" = "$TESTED_IMAGE_DIGEST"
+          docker load --input /tmp/staging-image.tar
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c image --severity HIGH,CRITICAL --exit-code 1 "$quarantine_tag"
+          docker push "$quarantine_tag"
+          pushed_ref=$(docker image inspect "$quarantine_tag" --format '{{index .RepoDigests 0}}')
+          test "${pushed_ref##*@}" = "$TESTED_IMAGE_DIGEST"
+          docker tag "$quarantine_tag" "$staging_tag"
+          docker push "$staging_tag"
+          pushed_ref=$(docker image inspect "$staging_tag" --format '{{index .RepoDigests 0}}')
+          test "${pushed_ref##*@}" = "$TESTED_IMAGE_DIGEST"
+          printf 'Tested and scanned image: %s\n' "$pushed_ref"

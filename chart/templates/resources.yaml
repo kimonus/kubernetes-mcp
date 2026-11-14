@@ -1,0 +1,210 @@
+{{- if not .Values.image }}{{ fail "image must be an immutable image reference" }}{{ end }}
+{{- if not (regexMatch "@sha256:[a-f0-9]{64}$" .Values.image) }}{{ fail "image must be pinned by sha256 digest" }}{{ end }}
+{{- if not (kindIs "bool" .Values.allNamespaces) }}{{ fail "allNamespaces must be a boolean" }}{{ end }}
+{{- if not (kindIs "bool" .Values.clusterScopedDiagnostics) }}{{ fail "clusterScopedDiagnostics must be a boolean" }}{{ end }}
+{{- if not (has .Values.authMode (list "bearer" "cloudflare")) }}{{ fail "invalid authMode" }}{{ end }}
+{{- if and (eq .Values.authMode "bearer") (not .Values.tokenSecret) }}{{ fail "tokenSecret is required for bearer mode" }}{{ end }}
+{{- if and (eq .Values.authMode "cloudflare") (or (not .Values.accessIssuer) (not .Values.accessAudience) (not .Values.accessEmails)) }}{{ fail "Cloudflare issuer, audience and emails are required" }}{{ end }}
+{{- if and (eq .Values.authMode "cloudflare") (not .Values.tlsSecret) }}{{ fail "tlsSecret is required for Cloudflare mode" }}{{ end }}
+{{- if and .Values.allNamespaces .Values.namespaces }}{{ fail "allNamespaces and namespaces are mutually exclusive" }}{{ end }}
+{{- if and (not .Values.allNamespaces) (not .Values.namespaces) }}{{ fail "at least one namespace is required unless allNamespaces is enabled" }}{{ end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-kubernetes-mcp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-kubernetes-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/instance: {{ .Release.Name | quote }}, app.kubernetes.io/name: kubernetes-mcp}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/instance: {{ .Release.Name | quote }}, app.kubernetes.io/name: kubernetes-mcp}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-kubernetes-mcp
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: server
+          image: {{ .Values.image | quote }}
+          ports:
+            - {name: http, containerPort: 8080}
+          env:
+            - name: MCP_AUTH_MODE
+              value: {{ .Values.authMode | quote }}
+            - name: MCP_NAMESPACES
+              {{- if .Values.allNamespaces }}
+              value: "*"
+              {{- else }}
+              value: {{ join "," .Values.namespaces | quote }}
+              {{- end }}
+            - name: MCP_ALLOWED_ORIGINS
+              value: {{ join "," .Values.allowedOrigins | quote }}
+            - name: MCP_CLUSTER_SCOPED_DIAGNOSTICS
+              value: {{ .Values.clusterScopedDiagnostics | quote }}
+            {{- if .Values.tlsSecret }}
+            - name: MCP_TLS_CERT_FILE
+              value: /run/tls/tls.crt
+            - name: MCP_TLS_KEY_FILE
+              value: /run/tls/tls.key
+            {{- end }}
+            {{- if eq .Values.authMode "bearer" }}
+            - name: MCP_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.tokenSecret | quote }}, key: token}
+            {{- else }}
+            - name: MCP_ACCESS_ISSUER
+              value: {{ .Values.accessIssuer | quote }}
+            - name: MCP_ACCESS_AUDIENCE
+              value: {{ .Values.accessAudience | quote }}
+            - name: MCP_ACCESS_EMAILS
+              value: {{ join "," .Values.accessEmails | quote }}
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          {{- if .Values.tlsSecret }}
+          volumeMounts:
+            - {name: origin-tls, mountPath: /run/tls, readOnly: true}
+          {{- end }}
+          readinessProbe:
+            tcpSocket: {port: http}
+          livenessProbe:
+            tcpSocket: {port: http}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.tlsSecret }}
+      volumes:
+        - name: origin-tls
+          secret:
+            secretName: {{ .Values.tlsSecret | quote }}
+            defaultMode: 0440
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-kubernetes-mcp
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/instance: {{ .Release.Name | quote }}, app.kubernetes.io/name: kubernetes-mcp}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+{{- if .Values.allNamespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-kubernetes-mcp
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "events", "services", "endpoints", "namespaces"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  {{- if .Values.clusterScopedDiagnostics }}
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  {{- end }}
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-kubernetes-mcp
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-kubernetes-mcp
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-kubernetes-mcp
+{{- else }}
+{{- range .Values.namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $.Release.Name }}-kubernetes-mcp
+  namespace: {{ . | quote }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "events", "services", "endpoints"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $.Release.Name }}-kubernetes-mcp
+  namespace: {{ . | quote }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $.Release.Name }}-kubernetes-mcp
+    namespace: {{ $.Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $.Release.Name }}-kubernetes-mcp
+{{- end }}
+{{- end }}
+{{- if and .Values.clusterScopedDiagnostics (not .Values.allNamespaces) }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-cluster-diagnostics
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-cluster-diagnostics
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-kubernetes-mcp
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-cluster-diagnostics
+{{- end }}

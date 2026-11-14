@@ -1,1 +1,15 @@
-# kubernetes-mcp
+# Kubernetes MCP
+
+A read-only Kubernetes diagnostics MCP server. A deployed instance has been exercised through Cloudflare Access and the ChatGPT connector. This project remains experimental: live revocation, production network isolation and rollback require further verification.
+
+The service provides namespace and pod discovery, pod health and logs, namespace events, workload and service status, optional node diagnostics, and metrics where Metrics Server is available. See the [tool reference](docs/tools.md) for arguments and limitations. It enforces an explicit namespace policy, bounded results and API timeouts. By default the chart creates namespace-scoped Roles; `allNamespaces: true` grants read-only access across current and future namespaces. `clusterScopedDiagnostics: true` additionally grants access to node status and node metrics. Logs, events and diagnostic messages are untrusted and may contain credentials or prompt injection.
+
+Pod listing returns at most one pod per page; pass its `continue` value back to retrieve the next page. Continuation tokens can expire and should be treated as opaque. A `truncated: true` log result means the server cut the returned text to fit its output limit. A null truncation value means the server cannot determine whether Kubernetes truncated the upstream response at `limitBytes`; it does not guarantee a complete log.
+
+Install `requirements.txt` and run the local suite with `python3 -m unittest discover -s tests -v`. HTTP tests require loopback networking. The server expects in-cluster service account credentials and `MCP_NAMESPACES` (comma-separated namespaces, or `*` for all). Select `MCP_AUTH_MODE=cloudflare` with `MCP_ACCESS_ISSUER`, `MCP_ACCESS_AUDIENCE`, and `MCP_ACCESS_EMAILS` for signed Access assertions, or `MCP_AUTH_MODE=bearer` and `MCP_BEARER_TOKEN` (at least 32 characters) for private testing. `MCP_ALLOWED_ORIGINS` is an optional comma-separated exact-origin allowlist. Origin TLS is configured with both `MCP_TLS_CERT_FILE` and `MCP_TLS_KEY_FILE` and is required in Cloudflare mode. Bearer mode is not suitable for a public endpoint. Token or TLS certificate rotation requires restarting the process. Cloudflare mode validates assertions locally; immediate revocation remains unverified.
+
+The hash-locked runtime wheels cover standard CPython 3.12–3.14 on Linux x86_64 and aarch64 with glibc or musl. The image and CI have been exercised on x86_64; aarch64 hashes are included but that architecture has not yet been tested. Other platforms require a separately reviewed lock update.
+
+The chart requires an immutable image digest and an explicit namespace policy. Bearer mode requires a pre-existing Secret named by `tokenSecret` with key `token`; Cloudflare mode requires its Access configuration. It does not configure an ingress, tunnel, or NetworkPolicy. A ClusterIP is not an authorization boundary: other cluster workloads may reach it. RBAC access to pods and workload objects exposes complete specs to the service account, including literal environment values or Secret references, even though responses select only diagnostic fields.
+
+See [discovery and outstanding work](docs/discovery.md), [operations](docs/operations.md), [threat model](docs/security/threat-model.md), [roadmap](ROADMAP.md), and [acceptance matrix](docs/testing/acceptance-matrix.md).
