@@ -20,9 +20,11 @@ async def smoke(port):
         streamable_http_client(f"http://127.0.0.1:{port}/mcp", http_client=http) as streams,
         ClientSession(streams[0], streams[1]) as session,
     ):
-        await session.initialize()
+        initialization = await session.initialize()
+        assert initialization.serverInfo.name == "kubernetes-mcp"
         tools = await session.list_tools()
-        assert len(tools.tools) == 5
+        assert {"list_pods", "describe_pod", "get_pod_events", "get_pod_logs", "get_previous_logs",
+                "list_namespaces", "list_all_pods", "list_workloads", "diagnose_pod"} <= {t.name for t in tools.tools}
         result = await session.call_tool("list_pods", {"namespace": "allowed"})
         assert not result.is_error
 

@@ -15,5 +15,8 @@ Reuse the existing Cloudflare Tunnel with a separate route. Verify authenticatio
 ## M4 — Acceptance and operations
 Test failure and restart cases, authorization boundaries, log size limits, API failures, rollback and client interoperability. Document operations.
 
+## M5 — Diagnostic expansion and metadata
+Extend namespace and cross-namespace discovery, event filtering, workload and service health, optional node and metrics diagnostics, and bounded pod diagnosis. Keep the original tools compatible, expose protocol-supported identity and tool annotations, and document ChatGPT registration behavior. Test read-only RBAC in isolated Kubernetes, redeploy the existing release after review and image verification, and validate the hosted connector. Record unsupported behavior and remaining revocation/rollback gates.
+
 ## Execution policy
 After M0 discovery, the implementation agent should proceed autonomously through all safe, reversible non-production stages unless a material architecture/security decision requires owner approval. It should then continue through all feasible stages: code, test, fix, self-review and handoff. Independent reviewer verifies evidence and returns actionable findings. Escalate only blocked decisions, credentials, destructive changes or production-impacting operations. No production deployment or merge without explicit approval.

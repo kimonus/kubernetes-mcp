@@ -42,6 +42,35 @@ class CoreTests(unittest.TestCase):
             call_tool(self.kube, {"allowed"}, "describe_pod", {"namespace": "other", "pod": "pod"})
         self.assertEqual(self.kube.calls, [])
 
+    def test_namespace_discovery_respects_restricted_mode(self):
+        result = call_tool(self.kube, {"b", "a"}, "list_namespaces", {})
+        self.assertEqual(result["namespaces"], [{"name": "a"}, {"name": "b"}])
+        self.assertEqual(self.kube.calls, [])
+
+    def test_cross_namespace_discovery_requires_explicit_scope(self):
+        with self.assertRaises(InvalidInput):
+            call_tool(self.kube, {"allowed"}, "list_all_pods", {})
+        self.assertEqual(self.kube.calls, [])
+        call_tool(self.kube, {"*"}, "list_all_pods", {"continue": "opaque"})
+        self.assertEqual(self.kube.calls[0], ("/api/v1/pods", {"limit": 1, "continue": "opaque"}))
+
+    def test_event_filter_and_pagination_are_bounded(self):
+        call_tool(self.kube, {"allowed"}, "list_namespace_events", {
+            "namespace": "allowed", "type": "Warning", "reason": "FailedScheduling", "continue": "next"})
+        self.assertEqual(self.kube.calls[0][1], {"limit": 20, "continue": "next",
+                                                  "fieldSelector": "reason=FailedScheduling,type=Warning"})
+        with self.assertRaises(InvalidInput):
+            call_tool(self.kube, {"allowed"}, "list_namespace_events", {"namespace": "allowed", "reason": "x,type=Normal"})
+
+    def test_pod_reports_container_names_without_specs(self):
+        class Pod(FakeKubernetes):
+            def get(self, *args, **kwargs):
+                return {"metadata": {"name": "pod"}, "spec": {"containers": [
+                    {"name": "main", "env": [{"value": "private"}]}, {"name": "sidecar"}]}}
+        result = call_tool(Pod(), {"allowed"}, "describe_pod", {"namespace": "allowed", "pod": "pod"})
+        self.assertEqual(result["containerNames"], ["main", "sidecar"])
+        self.assertNotIn("private", json.dumps(result))
+
     def test_all_namespaces_explicitly_allows_other_namespace(self):
         call_tool(self.kube, {"*"}, "describe_pod", {"namespace": "other", "pod": "pod"})
         self.assertEqual(self.kube.calls[0][0], "/api/v1/namespaces/other/pods/pod")
@@ -99,6 +128,17 @@ class CoreTests(unittest.TestCase):
                              "params": {"name": "describe_pod", "arguments": {}}}, self.kube, {"allowed"})
         self.assertTrue(response["result"]["isError"])
         self.assertNotIn("namespace", json.dumps(response))
+
+    def test_protocol_advertises_branding_and_read_only_tool_schemas(self):
+        init = dispatch({"jsonrpc": "2.0", "id": 1, "method": "initialize"}, self.kube, {"*"})["result"]
+        self.assertEqual(init["serverInfo"]["name"], "kubernetes-mcp")
+        self.assertTrue(init["serverInfo"]["icons"][0]["src"].startswith("data:image/png;base64,"))
+        tools = dispatch({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, self.kube, {"*"})["result"]["tools"]
+        definitions = {tool["name"]: tool for tool in tools}
+        self.assertIn("list_namespaces", definitions)
+        self.assertIn("list_workloads", definitions)
+        self.assertTrue(all(t["annotations"]["readOnlyHint"] for t in tools))
+        self.assertTrue(all(t["inputSchema"]["type"] == "object" for t in tools))
 
     def test_api_failure_is_sanitized(self):
         class Broken:

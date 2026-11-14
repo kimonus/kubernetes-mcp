@@ -1,6 +1,7 @@
 {{- if not .Values.image }}{{ fail "image must be an immutable image reference" }}{{ end }}
 {{- if not (regexMatch "@sha256:[a-f0-9]{64}$" .Values.image) }}{{ fail "image must be pinned by sha256 digest" }}{{ end }}
 {{- if not (kindIs "bool" .Values.allNamespaces) }}{{ fail "allNamespaces must be a boolean" }}{{ end }}
+{{- if not (kindIs "bool" .Values.clusterScopedDiagnostics) }}{{ fail "clusterScopedDiagnostics must be a boolean" }}{{ end }}
 {{- if not (has .Values.authMode (list "bearer" "cloudflare")) }}{{ fail "invalid authMode" }}{{ end }}
 {{- if and (eq .Values.authMode "bearer") (not .Values.tokenSecret) }}{{ fail "tokenSecret is required for bearer mode" }}{{ end }}
 {{- if and (eq .Values.authMode "cloudflare") (or (not .Values.accessIssuer) (not .Values.accessAudience) (not .Values.accessEmails)) }}{{ fail "Cloudflare issuer, audience and emails are required" }}{{ end }}
@@ -46,6 +47,8 @@ spec:
               {{- end }}
             - name: MCP_ALLOWED_ORIGINS
               value: {{ join "," .Values.allowedOrigins | quote }}
+            - name: MCP_CLUSTER_SCOPED_DIAGNOSTICS
+              value: {{ .Values.clusterScopedDiagnostics | quote }}
             {{- if .Values.tlsSecret }}
             - name: MCP_TLS_CERT_FILE
               value: /run/tls/tls.crt
@@ -103,8 +106,25 @@ metadata:
   name: {{ .Release.Namespace }}-{{ .Release.Name }}-kubernetes-mcp
 rules:
   - apiGroups: [""]
-    resources: ["pods", "events"]
+    resources: ["pods", "events", "services", "endpoints", "namespaces"]
     verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  {{- if .Values.clusterScopedDiagnostics }}
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  {{- end }}
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
@@ -131,7 +151,16 @@ metadata:
   namespace: {{ . | quote }}
 rules:
   - apiGroups: [""]
-    resources: ["pods", "events"]
+    resources: ["pods", "events", "services", "endpoints"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
     verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["pods/log"]
@@ -151,4 +180,31 @@ roleRef:
   kind: Role
   name: {{ $.Release.Name }}-kubernetes-mcp
 {{- end }}
+{{- end }}
+{{- if and .Values.clusterScopedDiagnostics (not .Values.allNamespaces) }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-cluster-diagnostics
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-cluster-diagnostics
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-kubernetes-mcp
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-cluster-diagnostics
 {{- end }}

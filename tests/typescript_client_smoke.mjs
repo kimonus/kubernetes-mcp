@@ -13,7 +13,9 @@ const transport = new StreamableHTTPClientTransport(new URL(process.argv[2]), {
 try {
   await client.connect(transport);
   const tools = await client.listTools();
-  if (tools.tools.length !== 5) throw new Error('Unexpected tool count');
+  for (const name of ['list_pods', 'describe_pod', 'get_pod_events', 'get_pod_logs', 'get_previous_logs', 'list_namespaces', 'list_workloads']) {
+    if (!tools.tools.some(tool => tool.name === name)) throw new Error(`Missing tool ${name}`);
+  }
   const result = await client.callTool({ name: 'list_pods', arguments: { namespace: 'allowed' } });
   if (result.isError) throw new Error('Tool call failed');
 } finally {

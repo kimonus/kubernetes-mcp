@@ -107,6 +107,9 @@ kubectl create namespace mcp-created-later
 identity=system:serviceaccount:default:e2e-all-kubernetes-mcp
 kubectl auth can-i list pods -n mcp-denied --as "$identity" --quiet
 kubectl auth can-i list pods -n mcp-created-later --as "$identity" --quiet
+kubectl auth can-i list namespaces --as "$identity" --quiet
+kubectl auth can-i list deployments.apps -n mcp-fixture --as "$identity" --quiet
+if kubectl auth can-i list nodes --as "$identity" --quiet; then exit 1; fi
 if kubectl auth can-i get secrets -n mcp-denied --as "$identity" --quiet; then exit 1; fi
 if kubectl auth can-i create pods -n mcp-denied --as "$identity" --quiet; then exit 1; fi
 kubectl -n default port-forward svc/e2e-all-kubernetes-mcp 18081:8080 > /tmp/kubernetes-mcp-all-e2e-forward.log 2>&1 &
