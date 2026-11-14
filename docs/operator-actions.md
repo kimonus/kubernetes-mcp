@@ -2,7 +2,7 @@
 
 This file collects the owner actions needed for hosted deployment. Do not put real tokens, account identifiers, email addresses, or private hostnames in this public repository or in chat.
 
-Current status: the operator supplied a token and selected the same allowed identity as the existing service. A separate Access application, route and Kubernetes release have been deployed. The original tools work through the ChatGPT connector. After a tool expansion, the connector's catalog must be refreshed and the new tools verified in ChatGPT; see [metadata and ChatGPT](metadata-and-chatgpt.md).
+Current status: the operator supplied a token and selected the same allowed identity as the existing service. A separate Access application, route and Kubernetes release have been deployed. The original tools worked through the ChatGPT connector; all 16 tools were subsequently called through the refreshed connected app in a new Codex session. ChatGPT icon and title rendering remain unverified; see [metadata and ChatGPT](metadata-and-chatgpt.md).
 
 ## 1. Create a separate Cloudflare API token
 

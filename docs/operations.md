@@ -1,6 +1,6 @@
 # Operations and rollout plan
 
-The service has been installed in a dedicated namespace and a separate protected route has been configured. Anonymous requests and OAuth discovery have been checked; authenticated hosted access and revocation remain unverified. Keep site-specific hostnames, Access settings, identities and credentials outside this public repository. The service exposes logs and events, which can contain sensitive data and hostile instructions. Grant access only to clients allowed to read every configured namespace.
+The service has been installed in a dedicated namespace and a separate protected route has been configured. Anonymous requests, OAuth discovery and authenticated hosted connector calls have been checked; live revocation remains unverified. Keep site-specific hostnames, Access settings, identities and credentials outside this public repository. The service exposes logs and events, which can contain sensitive data and hostile instructions. Grant access only to clients allowed to read every configured namespace.
 
 ## Prerequisites
 
@@ -24,4 +24,4 @@ Install in a staging namespace and test an anonymous request, a valid authorized
 
 ## Rollback
 
-For a new hosted route, remove only the route and Access application created for this service, then uninstall the release and confirm its Service, ServiceAccount, Roles and RoleBindings are gone. Keep the existing connector and other services untouched. Preserve the previous route configuration privately before making any route change. The isolated kind CI job verifies Helm release removal; it does not test Cloudflare rollback or production routing.
+For a hosted route, remove only the route and Access application created for this service, then uninstall the release and confirm its Service, ServiceAccount and associated RBAC resources, including any ClusterRoles and ClusterRoleBindings, are gone. Keep other services untouched. Preserve the previous route configuration privately before making any route change. The isolated kind CI job verifies Helm release removal; it does not test Cloudflare rollback or production routing.
